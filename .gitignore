@@ -1,0 +1,18 @@
+# Build-Ergebnisse
+obj/
+*.o
+mv643xx.device
+pegasos2-gbit-info
+s2test
+*.lha
+*.elf
+*.map
+
+# Laufzeitprotokolle und Testmitschnitte
+*.log
+*.pcap
+Crashlog*
+
+# Editor- und temporaere Dateien
+*~
+*.swp
