@@ -736,6 +736,9 @@ int mv_eth_tx_submit(struct mv_eth *e, ULONG len)
 
     if (e->state != MV_STARTED)
         return MV_ERR_STATE;
+
+    tx_reclaim(e);
+
     if (e->tx_count >= MV_TXN - 1)
         return MV_ERR_FULL;
     if (len < 14 || len > MV_MAXFRAME)
@@ -756,17 +759,20 @@ int mv_eth_tx_submit(struct mv_eth *e, ULONG len)
     d->w1       = 0;
     hw_sync();
 
-
-
+    /* Die Hardware-Queue nach jeder neuen Sendung sofort anstossen. */
     d->cmd_sts = TX_CMD;
     hw_sync();
-
 
     e->tx_cur = (e->tx_cur + 1) % MV_TXN;
     e->tx_count++;
 
     hw_wr(e->port, R_TXQ_CMD, 0x00000001UL);
+    hw_sync();
 
+    /* Den Ring sofort nach dem Submit erneut abarbeiten, damit wir den
+     * Abschluss der letzten DMA-Transfers nicht bis zum naechsten
+     * Poll-Zyklus warten lassen. */
+    tx_reclaim(e);
 
     return MV_OK;
 }
