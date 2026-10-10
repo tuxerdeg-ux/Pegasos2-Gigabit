@@ -98,7 +98,7 @@ struct Library *libInit(struct MyDev *md, APTR seglist, struct Interface *ISys)
     if (md->IDOS == NULL)
         goto out;
 
-        md->UtilityBase = md->IExec->OpenLibrary("utility.library", 50);
+    md->UtilityBase = md->IExec->OpenLibrary("utility.library", 50);
     if (md->UtilityBase != NULL)
         md->IUtility = (struct UtilityIFace *)md->IExec->GetInterface(
             md->UtilityBase, "main", 1, NULL);
@@ -201,7 +201,9 @@ LONG libOpen(struct DeviceManagerInterface *Self, struct IORequest *io,
     struct Opener *op;
 
     /* Beim Anlegen von Speicher kann ein Expunge dieses Devices kommen:
-     * einen Opener vortaeuschen, solange wir arbeiten. */
+     * einen Opener vortaeuschen, solange wir arbeiten. Der temporare
+     * Zaehler wird erst nach erfolgreichem Open in den echten OpenCount
+     * umgewandelt; bei Fehlern wird er wieder zurueckgesetzt. */
     md->md_Device.dd_Library.lib_OpenCnt++;
 
     dbg_printf("Open: Unit %ld, Flags 0x%lx, Request %ld Byte (noetig: %ld)\n",
@@ -277,8 +279,9 @@ LONG libOpen(struct DeviceManagerInterface *Self, struct IORequest *io,
     s2->ios2_BufferManagement = (APTR)op;
     io->io_Unit = (struct Unit *)mdu;
 
-    md->md_Device.dd_Library.lib_OpenCnt++;
     mdu->mdu_Unit.unit_OpenCnt++;
+    md->md_Device.dd_Library.lib_OpenCnt--;
+    md->md_Device.dd_Library.lib_OpenCnt++;
 
     md->md_Device.dd_Library.lib_Flags &= ~LIBF_DELEXP;
 
@@ -292,11 +295,10 @@ out:
     {
         /* io_Device bei Fehlern ungueltig machen */
         io->io_Device = NULL;
+        md->md_Device.dd_Library.lib_OpenCnt--;
     }
 
     io->io_Error = error;
-
-    md->md_Device.dd_Library.lib_OpenCnt--;
 
     return error;
 }
@@ -379,6 +381,11 @@ BPTR libExpunge(struct DeviceManagerInterface *Self)
         md->IExec->DropInterface((struct Interface *)md->IDOS);
     if (md->DOSBase != NULL)
         md->IExec->CloseLibrary(md->DOSBase);
+
+    if (md->IUtility != NULL)
+        md->IExec->DropInterface((struct Interface *)md->IUtility);
+    if (md->UtilityBase != NULL)
+        md->IExec->CloseLibrary(md->UtilityBase);
 
     md->IExec->DeleteLibrary((struct Library *)md);
 

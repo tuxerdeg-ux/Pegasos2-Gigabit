@@ -27,7 +27,9 @@
 #include <interfaces/exec.h>
 
 #define MV_RXN       256      /* Empfangsdeskriptoren */
-#define MV_TXN       16      /* Sendedeskriptoren (nutzbar: MV_TXN - 1) */
+#define MV_TXN       64       /* Sendedeskriptoren; groesserer Ring
+                               * reduziert TX-Stalls bei Burst-Uploads
+                               * und laesst noch ein reserviertes Slot frei */
 #define MV_BUFSIZE   2048    /* Puffergroesse je Deskriptor */
 #define MV_MAXFRAME  1514    /* groesster Frame ohne CRC */
 
