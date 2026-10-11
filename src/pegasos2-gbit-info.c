@@ -88,6 +88,64 @@ static ULONG log_read_reg(volatile ULONG *base,
     return value;
 }
 
+static void rx_queue_stop_test(void)
+{
+    volatile ULONG *port =
+        (volatile ULONG *)(MV64361_REG_BASE + ETH_PORT_BASE + ETH_PORT_STRIDE);
+    ULONG command, serial, current, i;
+
+    command = log_read_reg(port, 0x0280, "RXQ_COMMAND");
+    serial = log_read_reg(port, 0x003c, "PORT_SERIAL_CONTROL");
+    current = log_read_reg(port, 0x020c, "RXQ_CURRENT_DESC_PTR");
+
+    log_printf("\nRX-Queue-Stopp-Test (Port 1, Queue 0)\n");
+    log_printf("  vorher: RXQ_COMMAND=0x%08lx RXQ_CURRENT_DESC_PTR=0x%08lx"
+               " SERIAL=0x%08lx\n",
+               command, current, serial);
+
+    if (!(command & 0x01))
+    {
+        log_printf("  Queue 0 ist nicht aktiv; kein Schreibzugriff.\n");
+        return;
+    }
+
+    log_printf("  Sende Stop-Befehl 0x00000100; maximal 600000 Registerabfragen.\n");
+    *(volatile ULONG *)((UBYTE *)port + 0x0280) = __builtin_bswap32(0x00000100UL);
+    __asm__ __volatile__("sync" : : : "memory");
+
+    for (i = 0; i < 600000UL; i++)
+        if (!(log_read_reg(port, 0x0280, "RXQ_COMMAND") & 0x01))
+            break;
+
+    command = log_read_reg(port, 0x0280, "RXQ_COMMAND");
+    current = log_read_reg(port, 0x020c, "RXQ_CURRENT_DESC_PTR");
+    log_printf("  nach Stop: RXQ_COMMAND=0x%08lx RXQ_CURRENT_DESC_PTR=0x%08lx"
+               " Abfragen=%lu\n",
+               command, current, i);
+
+    if (command & 0x01)
+    {
+        log_printf("  Ergebnis: Stop-Befehl hat Queue 0 nicht angehalten.\n");
+        return;
+    }
+
+    log_printf("  Stelle den vorher aktiven Queue-Zustand mit Start-Befehl wieder her.\n");
+    *(volatile ULONG *)((UBYTE *)port + 0x0280) = __builtin_bswap32(0x00000001UL);
+    __asm__ __volatile__("sync" : : : "memory");
+
+    for (i = 0; i < 600000UL; i++)
+        if (log_read_reg(port, 0x0280, "RXQ_COMMAND") & 0x01)
+            break;
+
+    command = log_read_reg(port, 0x0280, "RXQ_COMMAND");
+    current = log_read_reg(port, 0x020c, "RXQ_CURRENT_DESC_PTR");
+    log_printf("  nach Wiederherstellung: RXQ_COMMAND=0x%08lx"
+               " RXQ_CURRENT_DESC_PTR=0x%08lx Abfragen=%lu\n",
+               command, current, i);
+    if (!(command & 0x01))
+        log_printf("  WARNUNG: Queue blieb nach dem Start-Befehl gestoppt.\n");
+}
+
 static int mdio_read(volatile ULONG *smi,
                       ULONG phy_addr,
                       ULONG phy_reg,
@@ -1008,6 +1066,17 @@ static const char *opt_value(int argc, char **argv, const char *name)
             return argv[i + 1];
     return NULL;
 }
+
+static int has_option(int argc, char **argv, const char *name)
+{
+    int i;
+
+    for (i = 1; i < argc; i++)
+        if (strcmp(argv[i], name) == 0)
+            return 1;
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *log_filename = "RAM:pegasos2-gbit.log";
@@ -1362,6 +1431,9 @@ int main(int argc, char **argv)
                            log_read_reg(pp, 0x02c0 + (q << 2), "TXQ_CUR"));
         }
     }
+
+    if (has_option(argc, argv, "-rxstoptest"))
+        rx_queue_stop_test();
 
    volatile ULONG *smi;
 

@@ -13,6 +13,14 @@
 #include "mv643xx.h"
 #include "dev_wait.h"
 
+static void clear_memory(APTR memory, ULONG size)
+{
+    volatile UBYTE *p = (volatile UBYTE *)memory;
+
+    while (size--)
+        *p++ = 0;
+}
+
 static struct MyDevUnit *start_unit;
 
 static int32 unit_process(STRPTR args, int32 arglen, struct ExecBase *sysbase)
@@ -127,9 +135,13 @@ LONG InitUnit(ULONG unit_number, struct MyDev *md)
 
     dbg_printf("InitUnit %ld\n", (LONG)unit_number);
 
-    mdu = (struct MyDevUnit *)AllocMem(sizeof(*mdu), MEMF_SHARED | MEMF_CLEAR);
+    mdu = (struct MyDevUnit *)AllocVecTags(
+        sizeof(*mdu),
+        AVT_Type, MEMF_SHARED,
+        TAG_DONE);
     if (mdu == NULL)
         return IOERR_OPENFAIL;
+    clear_memory(mdu, sizeof(*mdu));
 
     mdu->mdu_UnitNum = unit_number;
     mdu->mdu_Device = md;
@@ -137,7 +149,7 @@ LONG InitUnit(ULONG unit_number, struct MyDev *md)
     if (mv_eth_open(&mdu->mdu_Eth, IExec, md->IMMU, dbg_printf) != MV_OK)
     {
         dbg_printf("InitUnit: mv_eth_open() fehlgeschlagen\n");
-        FreeMem(mdu, sizeof(*mdu));
+        FreeVec(mdu);
         return IOERR_OPENFAIL;
     }
 
@@ -197,7 +209,7 @@ LONG InitUnit(ULONG unit_number, struct MyDev *md)
     {
         dbg_printf("InitUnit: Prozess konnte nicht gestartet werden\n");
         mv_eth_close(&mdu->mdu_Eth);
-        FreeMem(mdu, sizeof(*mdu));
+        FreeVec(mdu);
         return IOERR_OPENFAIL;
     }
 
@@ -231,6 +243,6 @@ BOOL StopUnit(struct MyDevUnit *mdu, struct MyDev *md)
     }
 
     md->md_Units[unit_number] = NULL;
-    FreeMem(mdu, sizeof(*mdu));
+    FreeVec(mdu);
     return TRUE;
 }

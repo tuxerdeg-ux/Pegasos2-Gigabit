@@ -32,17 +32,6 @@
 #define SMI_READ     0x04000000UL
 #define SMI_TIMEOUT  1000000UL
 
-/* PHY Basic Control Register (MII Reg 0) */
-#define PHY_BMCR          0UL
-#define PHY_BMCR_RESET    0x8000UL
-#define PHY_BMCR_ANENABLE 0x1000UL
-#define PHY_BMCR_ANRESTART 0x0200UL
-
-#define PHY_ANAR          4UL   /* Autonegotiation Advertisement */
-#define PHY_CTRL1000      9UL   /* 1000BASE-T Control */
-#define PHY_RESET_POLLS   100UL
-
-
 /* Portregister */
 #define R_PCONF      0x0000UL
 #define R_PCONFEXT   0x0004UL
@@ -264,6 +253,97 @@ static void ring_reset(struct mv_eth *e)
     e->tx_count = 0;
 }
 
+static int recover_stale_port(struct mv_eth *e)
+{
+    ULONG tx_cmd = hw_rd(e->port, R_TXQ_CMD);
+    ULONG rx_cmd = hw_rd(e->port, R_RXQ_CMD);
+    ULONG serial = hw_rd(e->port, R_SERIAL);
+    ULONG i, status;
+    int tx_idle = 0, rx_idle = 0, tx_flush_idle = 0;
+
+    if (!(tx_cmd & 0xff) && !(rx_cmd & 0xff) && !(serial & 0x01))
+        return MV_OK;
+
+    /*
+     * A soft OS restart can leave this driver's port enabled with either
+     * queue state. Do not take over a port with an unknown configuration.
+     */
+     if (serial != 0x000A0601UL ||
+         hw_rd(e->port, R_SDMA) != 0x00800004UL)
+    {
+        if (e->logf)
+            e->logf("mv_eth_open: Ethernet-Port aktiv/unbekannt"
+                    " (SERIAL 0x%08lx, TXQ 0x%08lx, RXQ 0x%08lx)\n",
+                    (unsigned long)serial,
+                    (unsigned long)tx_cmd,
+                    (unsigned long)rx_cmd);
+        return (tx_cmd & 0xff) || (rx_cmd & 0xff) ?
+               MV_ERR_BUSY : MV_ERR_ENABLED;
+    }
+
+    if (e->logf)
+        e->logf("mv_eth_open: verwaiste Treiber-Konfiguration erkannt;"
+                " stoppe Queues und Port\n");
+
+    hw_wr(e->port, R_TXQ_CMD, 0x00000100UL);
+    hw_wr(e->port, R_RXQ_CMD, 0x00000100UL);
+    hw_sync();
+
+    for (i = 0; i < WAIT_LOOPS; i++)
+        if (!(hw_rd(e->port, R_TXQ_CMD) & 0x01))
+        {
+            tx_idle = 1;
+            break;
+        }
+    for (i = 0; i < WAIT_LOOPS; i++)
+        if (!(hw_rd(e->port, R_RXQ_CMD) & 0x01))
+        {
+            rx_idle = 1;
+            break;
+        }
+    for (i = 0; i < WAIT_LOOPS; i++)
+    {
+        status = hw_rd(e->port, R_STATUS);
+        if ((status & (ST_TX_INPROGRESS | ST_TXFIFO_EMPTY)) ==
+            ST_TXFIFO_EMPTY)
+        {
+            tx_flush_idle = 1;
+            break;
+        }
+    }
+
+    if (!tx_idle || !rx_idle || !tx_flush_idle)
+    {
+        hw_wr(e->port, R_SERIAL, serial & ~0x01UL);
+        hw_sync();
+        if (e->logf)
+            e->logf("mv_eth_open: Queue-Stopp fehlgeschlagen"
+                    " (TX %ld, RX %ld, TX-FIFO %ld)\n",
+                    (long)tx_idle, (long)rx_idle, (long)tx_flush_idle);
+        return MV_ERR_TIMEOUT;
+    }
+
+    hw_wr(e->port, R_SERIAL, serial & ~0x01UL);
+    hw_wr(e->port, R_TXQ_PTR, 0);
+    hw_wr(e->port, R_RXQ_PTR, 0);
+    hw_wr(e->port, R_INT_CAUSE, 0);
+    hw_wr(e->port, R_INT_EXT, 0);
+    hw_sync();
+
+    if ((hw_rd(e->port, R_TXQ_CMD) & 0xff) ||
+        (hw_rd(e->port, R_RXQ_CMD) & 0xff) ||
+        (hw_rd(e->port, R_SERIAL) & 0x01))
+    {
+        if (e->logf)
+            e->logf("mv_eth_open: Hardware blieb nach Queue-Stopp aktiv\n");
+        return MV_ERR_TIMEOUT;
+    }
+
+    if (e->logf)
+        e->logf("mv_eth_open: verwaiste Queues gestoppt\n");
+    return MV_OK;
+}
+
 /* ---- Oeffnen / Schliessen --------------------------------------- */
 
 int mv_eth_open(struct mv_eth *e, struct ExecIFace *iexec,
@@ -272,6 +352,7 @@ int mv_eth_open(struct mv_eth *e, struct ExecIFace *iexec,
     struct DMAEntry dmalist[8];
     ULONG n, phys, h, l, k;
     APTR oldstack;
+    int r;
 
     zero_mem(e, sizeof(*e));
     e->iexec  = iexec;
@@ -280,11 +361,9 @@ int mv_eth_open(struct mv_eth *e, struct ExecIFace *iexec,
     e->shared = (volatile ULONG *)(MV64361_REG_BASE + SHARED_OFS);
     e->port   = (volatile ULONG *)(MV64361_REG_BASE + PORT_OFS);
 
-    /* Vorbedingungen wie in den Tests: nichts laeuft, Port aus */
-    if ((hw_rd(e->port, R_TXQ_CMD) & 0xff) || (hw_rd(e->port, R_RXQ_CMD) & 0xff))
-        return MV_ERR_BUSY;
-    if (hw_rd(e->port, R_SERIAL) & 0x00000001UL)
-        return MV_ERR_ENABLED;
+    r = recover_stale_port(e);
+    if (r != MV_OK)
+        return r;
 
     e->mem = (UBYTE *)iexec->AllocVecTags(MEM_SIZE,
                  AVT_Type, MEMF_SHARED,
@@ -393,85 +472,6 @@ static void log_link_diag(struct mv_eth *e, const char *where)
         rc10 ? "ERR:" : "0x", (unsigned long)r10,
         rc17 ? "ERR:" : "0x", (unsigned long)r17);
 }
-/*
- * PHY zuruecksetzen und Autonegotiation neu starten.
- * Die Advertisement-Register werden vor dem Reset gesichert,
- * weil ein PHY-Reset ihre Werte auf Defaults setzen kann.
- */
-static int phy_restart_autoneg(struct mv_eth *e)
-{
-    ULONG bmcr, anar, ctrl1000, v;
-    ULONG i;
-    int rc;
-
-    rc = mv_mdio_read(e, e->phy, PHY_BMCR, &bmcr);
-    if (rc != MV_OK)
-        goto mdio_error;
-
-    rc = mv_mdio_read(e, e->phy, PHY_ANAR, &anar);
-    if (rc != MV_OK)
-        goto mdio_error;
-
-    rc = mv_mdio_read(e, e->phy, PHY_CTRL1000, &ctrl1000);
-    if (rc != MV_OK)
-        goto mdio_error;
-
-    if (e->logf)
-        e->logf("[PHY-RESET] vorher BMCR=0x%04lx ANAR=0x%04lx CTRL1000=0x%04lx\n",
-                (unsigned long)bmcr,
-                (unsigned long)anar,
-                (unsigned long)ctrl1000);
-
-    rc = mv_mdio_write(e, e->phy, PHY_BMCR, bmcr | PHY_BMCR_RESET);
-    if (rc != MV_OK)
-        goto mdio_error;
-
-    /* Reset-Bit muss sich selbststaendig loeschen. */
-    for (i = 0; i < PHY_RESET_POLLS; ++i)
-    {
-        rc = mv_mdio_read(e, e->phy, PHY_BMCR, &v);
-        if (rc != MV_OK)
-            goto mdio_error;
-
-        if (!(v & PHY_BMCR_RESET))
-            break;
-    }
-
-    if (i == PHY_RESET_POLLS)
-    {
-        if (e->logf)
-            e->logf("[PHY-RESET] TIMEOUT: Reset-Bit bleibt gesetzt\n");
-        return MV_ERR_TIMEOUT;
-    }
-
-    /* Vorherige Autonegotiation- und Gigabit-Ankuendigung restaurieren. */
-    rc = mv_mdio_write(e, e->phy, PHY_ANAR, anar);
-    if (rc != MV_OK)
-        goto mdio_error;
-
-    rc = mv_mdio_write(e, e->phy, PHY_CTRL1000, ctrl1000);
-    if (rc != MV_OK)
-        goto mdio_error;
-
-    /* Autonegotiation einschalten und explizit neu starten. */
-    bmcr &= ~(PHY_BMCR_RESET | PHY_BMCR_ANRESTART);
-    bmcr |= PHY_BMCR_ANENABLE | PHY_BMCR_ANRESTART;
-
-    rc = mv_mdio_write(e, e->phy, PHY_BMCR, bmcr);
-    if (rc != MV_OK)
-        goto mdio_error;
-
-    if (e->logf)
-        e->logf("[PHY-RESET] Reset beendet; Autonegotiation neu gestartet\n");
-
-    return MV_OK;
-
-mdio_error:
-    if (e->logf)
-        e->logf("[PHY-RESET] MDIO-Fehler %ld\n", (long)rc);
-    return rc;
-}
-
 int mv_eth_start(struct mv_eth *e)
 {
     if (e->state != MV_OPEN || e->hung)
@@ -737,8 +737,6 @@ int mv_eth_tx_submit(struct mv_eth *e, ULONG len)
     if (e->state != MV_STARTED)
         return MV_ERR_STATE;
 
-    tx_reclaim(e);
-
     if (e->tx_count >= MV_TXN - 1)
         return MV_ERR_FULL;
     if (len < 14 || len > MV_MAXFRAME)
@@ -759,7 +757,6 @@ int mv_eth_tx_submit(struct mv_eth *e, ULONG len)
     d->w1       = 0;
     hw_sync();
 
-    /* Die Hardware-Queue nach jeder neuen Sendung sofort anstossen. */
     d->cmd_sts = TX_CMD;
     hw_sync();
 
@@ -767,12 +764,6 @@ int mv_eth_tx_submit(struct mv_eth *e, ULONG len)
     e->tx_count++;
 
     hw_wr(e->port, R_TXQ_CMD, 0x00000001UL);
-    hw_sync();
-
-    /* Den Ring sofort nach dem Submit erneut abarbeiten, damit wir den
-     * Abschluss der letzten DMA-Transfers nicht bis zum naechsten
-     * Poll-Zyklus warten lassen. */
-    tx_reclaim(e);
 
     return MV_OK;
 }

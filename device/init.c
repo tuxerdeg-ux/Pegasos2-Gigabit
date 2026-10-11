@@ -20,16 +20,24 @@
 #undef SuperState
 #undef UserState
 #undef RemapMemory
+#undef AllocVecTags
+#undef FreeVec
 #undef OpenLibrary
 #undef CloseLibrary
 #undef DeleteLibrary
-#undef AllocMem
-#undef FreeMem
 #undef NewList
 #undef Forbid
 #undef Permit
 #undef AddTail
 #undef Remove
+
+static void clear_memory(APTR memory, ULONG size)
+{
+    volatile UBYTE *p = (volatile UBYTE *)memory;
+
+    while (size--)
+        *p++ = 0;
+}
 
 /* Versions-Tag */
 STATIC CONST UBYTE
@@ -247,12 +255,16 @@ LONG libOpen(struct DeviceManagerInterface *Self, struct IORequest *io,
     }
     mdu = md->md_Units[unit_number];
 
-    op = (struct Opener *)md->IExec->AllocMem(sizeof(*op), MEMF_SHARED | MEMF_CLEAR);
+    op = (struct Opener *)md->IExec->AllocVecTags(
+        sizeof(*op),
+        AVT_Type, MEMF_SHARED,
+        TAG_DONE);
     if (op == NULL)
     {
         error = IOERR_OPENFAIL;
         goto out;
     }
+    clear_memory(op, sizeof(*op));
 
     md->IExec->NewList(&op->op_Reads);
     op->op_Flags = flags;
@@ -263,7 +275,7 @@ LONG libOpen(struct DeviceManagerInterface *Self, struct IORequest *io,
         (op->op_CopyToBuff == NULL || op->op_CopyFromBuff == NULL))
     {
         dbg_printf("  abgelehnt: weder SANA2-Hook noch CopyToBuff/CopyFromBuff vorhanden\n");
-        md->IExec->FreeMem(op, sizeof(*op));
+        md->IExec->FreeVec(op);
         error = IOERR_OPENFAIL;
         goto out;
     }
@@ -324,7 +336,7 @@ BPTR libClose(struct DeviceManagerInterface *Self, struct IORequest *io)
     md->IExec->Remove(&op->op_Node);
     md->IExec->Permit();
 
-    md->IExec->FreeMem(op, sizeof(*op));
+    md->IExec->FreeVec(op);
 
     /* IORequest unbrauchbar machen: eine spaetere Benutzung stuerzt sofort
      * ab, statt unauffaellig Speicher zu zerstoeren */

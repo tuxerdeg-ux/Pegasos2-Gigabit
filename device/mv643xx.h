@@ -4,10 +4,9 @@
  * mv643xx.h -- SANA-II-Treiber fuer den Gigabit-Ethernetport des
  *              Marvell MV64361 (Pegasos II, AmigaOS 4.1)
  *
- * Stufe 1: Geruest. Das Device laesst sich oeffnen, beantwortet die
- * Verwaltungsbefehle und schreibt alles Beobachtete in eine Textdatei.
- * Es gibt noch KEINEN Zugriff auf die Hardware: Pakete werden nicht
- * gesendet, und es kommen keine an.
+ * Das Device verarbeitet SANA-II-Verwaltungs- und Datenbefehle und
+ * kommuniziert ueber die Hardwareschicht mit dem MV64361. Im Dev-Build
+ * werden Diagnosemeldungen in eine Textdatei geschrieben.
  *
  * Aufbau nach ramdev (Hyperion/Aminet): jede .c-Datei definiert
  * __USE_INLINE__ vor dem Einbinden, und IExec/IDOS sind Makros auf
@@ -41,7 +40,7 @@
 #define ETH_MTU           1500
 #define MYPROCSTACKSIZE   32768
 #define MYPROCPRI         0
-#define DEFAULT_LOGFILE   "AST0:mv643xx.log"
+#define DEFAULT_LOGFILE   "RAM:mv643xx.log"
 
 /* Zustandsbits einer Unit */
 #define UF_CONFIGURED     (1UL << 0)
@@ -111,7 +110,7 @@ struct MyDevUnit
     struct List     mdu_Orphans;    /* wartende S2_READORPHAN */
     struct List     mdu_Events;     /* wartende S2_ONEVENT */
 
-    ULONG           mdu_Dropped;    /* verworfene Schreibanfragen (Stufe 1) */
+    ULONG           mdu_Dropped;    /* RX-Frames ohne passenden Empfaenger */
     ULONG mdu_HoldPolls;        /* Aufrufe, seit ein Frame im Ring wartet */
     ULONG mdu_Held;             /* wie oft ein Frame gehalten wurde */
     ULONG mdu_NTypes;           /* Anzahl gelernter PacketTypes */

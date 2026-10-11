@@ -3,10 +3,7 @@
 
 #include <devices/timer.h>
 
-#define POLL_US 100UL   /* Poll-Intervall in Mikrosekunden.
-                         * Kurz genug, damit TX-Deskriptoren schnell wieder
-                         * freigegeben und die Queue nicht ohne Not auf den
-                         * naechsten Zyklus warten muss. */
+#define POLL_US 500UL   /* Poll-Intervall in Mikrosekunden */
 
 /* Wartet auf ein Signal des Unit-Ports oder bis POLL_US verstrichen ist.
  * Ohne Timer (ok == FALSE) faellt sie auf Delay(1) zurueck. */

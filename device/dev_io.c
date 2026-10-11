@@ -1,9 +1,9 @@
 /*
  * dev_io.c -- BeginIO / AbortIO
  *
- * Stufe 1: Jede Anfrage wird an den Server-Prozess der Unit geschickt,
- * der sie in perform_io() (dev_cmd.c) bearbeitet. BeginIO selbst wartet
- * nie (Regel aus ramdev: nie auf den Zeitplan des Aufrufers warten).
+ * Jede Anfrage wird an den Server-Prozess der Unit geschickt, der sie in
+ * perform_io() (dev_cmd.c) bearbeitet. BeginIO selbst wartet nie (Regel
+ * aus ramdev: nie auf den Zeitplan des Aufrufers warten).
  */
 
 #define __USE_INLINE__ 1

@@ -1,5 +1,5 @@
 # pegasos2device -- Gigabit-Treiber fuer den Pegasos II (AmigaOS 4.1)
-# Befehle:  make hwtest | make dev | make s2test | make all | make clean
+# Befehle:  make hwtest | make dev | make build | make s2test | make all | make clean
 .RECIPEPREFIX = >
 
 CC       = ppc-amigaos-gcc
@@ -13,8 +13,10 @@ HWOBJS   = obj/mv64361.o obj/mv64361_test.o
 TESTSRC ?= src/pegasos2-gbit-info.c
 
 # Device
-DEVSRC   = device
-DEVOBJS  = obj/init.o obj/dev_unit.o obj/dev_io.o obj/dev_cmd.o obj/dev_log.o
+DEVSRC       = device
+DEVCOREOBJS  = obj/init.o obj/dev_unit.o obj/dev_io.o obj/dev_cmd.o
+DEVOBJS      = $(DEVCOREOBJS) obj/dev_log.o
+BUILDOBJS    = $(DEVCOREOBJS) obj/dev_log_stub.o
 DEVHWOBJS = obj/mv64361.o
 
 all: hwtest dev s2test
@@ -25,7 +27,7 @@ obj:
 $(HWOBJS): obj/%.o: $(HWSRC)/%.c $(HWSRC)/mv64361.h | obj
 > $(CC) $(CFLAGS) -c -o $@ $<
 
-$(DEVOBJS): obj/%.o: $(DEVSRC)/%.c $(wildcard $(DEVSRC)/*.h) | obj
+$(DEVCOREOBJS) obj/dev_log.o obj/dev_log_stub.o: obj/%.o: $(DEVSRC)/%.c $(wildcard $(DEVSRC)/*.h) | obj
 > $(CC) $(CFLAGS) -I$(DEVSRC) -c -o $@ $<
 
 # Testprogramm + Hardwareschicht
@@ -34,13 +36,19 @@ hwtest: $(HWOBJS)
 
 # das Device selbst
 dev: $(DEVOBJS) $(DEVHWOBJS)
-> $(CC) -nostartfiles -o mv643xx.device $(DEVOBJS) $(DEVHWOBJS) -lauto
+> $(CC) -nostartfiles -o mv643xx_log.device $(DEVOBJS) $(DEVHWOBJS) -lauto
+
+# Device ohne Dateilogger
+build: $(BUILDOBJS) $(DEVHWOBJS)
+> mkdir -p build
+> $(CC) -nostartfiles -o build/mv643xx.device $(BUILDOBJS) $(DEVHWOBJS) -lauto
 
 # SANA-II-Testclient
-s2test: s2test.c
-> $(CC) -O2 -Wall -o s2test s2test.c -lauto
+s2test: src/s2test.c
+> $(CC) -O2 -Wall -o s2test $< -lauto
 
 clean:
-> rm -rf obj pegasos2-gbit-info mv643xx.device s2test
+> rm -rf obj pegasos2-gbit-info mv643xx.device mv643xx_log.device s2test
+> rm -f build/mv643xx.device
 
-.PHONY: all hwtest dev s2test clean
+.PHONY: all hwtest dev build s2test clean

@@ -19,8 +19,10 @@
  *  - Die Registerseite 0xF1000000 (16 KB) muss vom Aufrufer bereits als
  *    cache-inhibit/guarded eingeblendet sein (RemapMemory), und der
  *    Aufrufer muss geprueft haben, dass ein MV64360/61 vorhanden ist.
- *  - Nicht getestet sind: Neustart einer angehaltenen RX-Queue
- *    (mv_eth_poll), mehrfaches Start/Stop, Linkwechsel im Betrieb.
+ *  - Nicht ausreichend getestet sind: Neustart einer angehaltenen RX-Queue
+ *    (mv_eth_poll), mehrfaches Start/Stop und Linkwechsel im Betrieb.
+ *  - Die Wiederherstellung nach AmigaOS-Soft-Neustart wurde auf Pegasos-II-
+ *    Hardware ausprobiert; weitere Konfigurationen bleiben zu verifizieren.
  */
 
 #include <exec/types.h>

@@ -5,8 +5,9 @@
  * Listen (Leseanfragen, Orphans, Events) werden unter Forbid()/Permit()
  * veraendert, weil AbortIO() sie aus fremden Kontexten durchsucht.
  *
- * Stufe 1: Es gibt keinen Hardwarezugriff. Schreibanfragen werden
- * angenommen und verworfen, Leseanfragen warten (es kommt nichts an).
+ * Die Ethernet-Hardware wird ueber mv64361.c bedient. RX-Frames werden
+ * per Polling an passende Leseanfragen verteilt; TX-Anfragen senden
+ * Ethernet-Frames ueber die Hardware.
  */
 
 #define __USE_INLINE__ 1

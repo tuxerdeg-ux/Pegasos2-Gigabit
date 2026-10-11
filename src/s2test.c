@@ -11,11 +11,12 @@
  *  C) S2_DEVICEQUERY, S2_GETSTATIONADDRESS
  *  D) S2_CONFIGINTERFACE, S2_ONLINE
  *  E) S2_ONEVENT und CMD_READ: absenden, nach 0,5 s abbrechen
- *  F) CMD_WRITE (Broadcast-Frame, Stufe 1 verwirft ihn)
+ *  F) CMD_WRITE (Broadcast-Frame ueber die Hardware senden)
  *  G) zweites S2_CONFIGINTERFACE                -> muss S2ERR_BAD_STATE liefern
  *  H) S2_OFFLINE, CloseDevice
  *
- * Die Kopierfunktionen sind Platzhalter: Stufe 1 des Devices ruft sie nie auf.
+ * Die Kopier-Callbacks sind Test-Stubs: Sie melden Erfolg, kopieren aber
+ * keine Daten. Das Device ruft sie bei Datenuebertragungen auf.
  */
 
 #include <stdio.h>
@@ -24,6 +25,9 @@
 #include <devices/sana2.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+
+#undef AllocSysObjectTags
+#undef FreeSysObject
 
 static struct MsgPort *port;
 
@@ -41,7 +45,11 @@ static BOOL dummy_copy_from(APTR to, APTR from, ULONG n)
 
 static struct IOSana2Req *clone_req(const struct IOSana2Req *src)
 {
-    struct IOSana2Req *r = (struct IOSana2Req *)IExec->CreateIORequest(port, sizeof(struct IOSana2Req));
+    struct IOSana2Req *r = (struct IOSana2Req *)IExec->AllocSysObjectTags(
+        ASOT_IOREQUEST,
+        ASOIOR_Size, sizeof(struct IOSana2Req),
+        ASOIOR_ReplyPort, port,
+        TAG_DONE);
 
     if (r)
     {
@@ -96,7 +104,7 @@ int main(int argc, char **argv)
     UBYTE frame[32];
     LONG err;
 
-    port = IExec->CreateMsgPort();
+    port = (struct MsgPort *)IExec->AllocSysObjectTags(ASOT_PORT, TAG_DONE);
     if (!port)
     {
         printf("Kein MsgPort\n");
@@ -106,7 +114,11 @@ int main(int argc, char **argv)
     printf("Device: %s\n", name);
 
     /* A) zu kurzer Request */
-    shortreq = (struct IOSana2Req *)IExec->CreateIORequest(port, sizeof(struct IOStdReq));
+    shortreq = (struct IOSana2Req *)IExec->AllocSysObjectTags(
+        ASOT_IOREQUEST,
+        ASOIOR_Size, sizeof(struct IOStdReq),
+        ASOIOR_ReplyPort, port,
+        TAG_DONE);
     if (shortreq)
     {
         err = IExec->OpenDevice(name, 0, (struct IORequest *)shortreq, 0);
@@ -114,7 +126,7 @@ int main(int argc, char **argv)
                err ? "abgelehnt (richtig)" : "ANGENOMMEN (falsch!)", (long)err);
         if (!err)
             IExec->CloseDevice((struct IORequest *)shortreq);
-        IExec->DeleteIORequest((struct IORequest *)shortreq);
+        IExec->FreeSysObject(ASOT_IOREQUEST, shortreq);
     }
 
     /* B) gueltiger Request */
@@ -123,11 +135,15 @@ int main(int argc, char **argv)
     tags[1].ti_Tag = S2_CopyFromBuff; tags[1].ti_Data = (ULONG)dummy_copy_from;
     tags[2].ti_Tag = TAG_DONE;
 
-    s2 = (struct IOSana2Req *)IExec->CreateIORequest(port, sizeof(struct IOSana2Req));
+    s2 = (struct IOSana2Req *)IExec->AllocSysObjectTags(
+        ASOT_IOREQUEST,
+        ASOIOR_Size, sizeof(struct IOSana2Req),
+        ASOIOR_ReplyPort, port,
+        TAG_DONE);
     if (!s2)
     {
         printf("Kein IORequest\n");
-        IExec->DeleteMsgPort(port);
+        IExec->FreeSysObject(ASOT_PORT, port);
         return 20;
     }
     s2->ios2_BufferManagement = tags;
@@ -137,8 +153,8 @@ int main(int argc, char **argv)
            err ? "FEHLGESCHLAGEN" : "ok", (long)err);
     if (err)
     {
-        IExec->DeleteIORequest((struct IORequest *)s2);
-        IExec->DeleteMsgPort(port);
+        IExec->FreeSysObject(ASOT_IOREQUEST, s2);
+        IExec->FreeSysObject(ASOT_PORT, port);
         return 10;
     }
 
@@ -172,14 +188,14 @@ int main(int argc, char **argv)
     {
         ev->ios2_WireError = S2EVENT_ERROR;
         send_and_abort(ev, S2_ONEVENT, "S2_ONEVENT (erwartet -2)");
-        IExec->DeleteIORequest((struct IORequest *)ev);
+        IExec->FreeSysObject(ASOT_IOREQUEST, ev);
     }
     if (rd)
     {
         rd->ios2_PacketType = 0x0806;
         rd->ios2_Data = frame;
         send_and_abort(rd, CMD_READ, "CMD_READ (erwartet -2)");
-        IExec->DeleteIORequest((struct IORequest *)rd);
+        IExec->FreeSysObject(ASOT_IOREQUEST, rd);
     }
 
     /* F) Schreiben */
@@ -193,7 +209,7 @@ int main(int argc, char **argv)
         wr->ios2_DataLength = sizeof(frame);
         wr->ios2_Data = frame;
         do_cmd(wr, CMD_WRITE, "CMD_WRITE");
-        IExec->DeleteIORequest((struct IORequest *)wr);
+        IExec->FreeSysObject(ASOT_IOREQUEST, wr);
     }
 
     /* G) doppelte Konfiguration */
@@ -204,8 +220,8 @@ int main(int argc, char **argv)
     printf("H) Abschluss\n");
     do_cmd(s2, S2_OFFLINE, "S2_OFFLINE");
     IExec->CloseDevice((struct IORequest *)s2);
-    IExec->DeleteIORequest((struct IORequest *)s2);
-    IExec->DeleteMsgPort(port);
+    IExec->FreeSysObject(ASOT_IOREQUEST, s2);
+    IExec->FreeSysObject(ASOT_PORT, port);
 
     printf("Fertig. Protokoll des Devices: RAM:mv643xx.log\n");
     return 0;
